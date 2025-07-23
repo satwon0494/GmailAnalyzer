@@ -1,0 +1,4 @@
+# Gmail Takeout Analyzer - Minimal dependencies for ultra-fast processing
+pandas==2.1.0
+tqdm==4.66.1
+# No Google API dependencies needed - processes local files only!

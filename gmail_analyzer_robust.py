@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Gmail Analyzer - Extract insights from Gmail inbox data
-Generates CSV reports with sender statistics, volume analysis, and date ranges
+Gmail Analyzer - Robust version with error handling and batch processing
 """
 
 import os
 import pickle
 import csv
 import time
+import json
 from datetime import datetime, timedelta
 from collections import defaultdict, Counter
 from typing import Dict, List, Tuple, Optional
@@ -22,7 +22,7 @@ from tqdm import tqdm
 # Gmail API scopes
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
-class GmailAnalyzer:
+class RobustGmailAnalyzer:
     def __init__(self, credentials_path: str = 'credentials.json'):
         self.credentials_path = credentials_path
         self.service = None
@@ -53,13 +53,40 @@ class GmailAnalyzer:
                 
         self.service = build('gmail', 'v1', credentials=creds)
         
-    def fetch_emails(self, start_date: str, end_date: str, max_results: Optional[int] = 10000) -> List[Dict]:
-        """Fetch emails from Gmail within date range with pagination support"""
+    def save_progress(self, emails: List[Dict], filename: str = 'progress_backup.json') -> None:
+        """Save current progress to file"""
+        progress_data = {
+            'timestamp': datetime.now().isoformat(),
+            'email_count': len(emails),
+            'emails': emails
+        }
+        with open(filename, 'w') as f:
+            json.dump(progress_data, f, default=str, indent=2)
+            
+    def load_progress(self, filename: str = 'progress_backup.json') -> List[Dict]:
+        """Load previous progress from file"""
+        if os.path.exists(filename):
+            with open(filename, 'r') as f:
+                progress_data = json.load(f)
+                return progress_data.get('emails', [])
+        return []
+        
+    def fetch_emails_robust(self, start_date: str, end_date: str, max_results: Optional[int] = 10000, 
+                           resume: bool = False) -> List[Dict]:
+        """Fetch emails with robust error handling and progress saving"""
         if not self.service:
             raise RuntimeError("Not authenticated. Call authenticate() first.")
             
-        # Fix date range: Gmail 'before' is exclusive, so add 1 day to end_date
-        from datetime import datetime, timedelta
+        # Check for existing progress
+        if resume:
+            existing_emails = self.load_progress()
+            if existing_emails:
+                print(f"Found {len(existing_emails)} emails from previous run. Resume? (y/n)")
+                if input().lower() == 'y':
+                    self.emails_data = existing_emails
+                    return existing_emails
+                    
+        # Fix date range: Gmail 'before' is exclusive
         try:
             end_dt = datetime.strptime(end_date, "%Y/%m/%d")
             adjusted_end_dt = end_dt + timedelta(days=1)
@@ -67,13 +94,33 @@ class GmailAnalyzer:
         except ValueError:
             raise ValueError(f"Invalid date format. Use YYYY/MM/DD format. Got: {end_date}")
             
-        # Create Gmail query
         query = f'after:{start_date} before:{adjusted_end_date}'
-        
         print(f"Fetching emails from {start_date} to {end_date} (inclusive)...")
         print(f"Gmail query: {query}")
         
-        # Fetch all messages with pagination
+        # Fetch all message IDs with pagination
+        all_messages = self._fetch_message_ids(query, max_results)
+        
+        if not all_messages:
+            print("No messages found in the specified date range.")
+            return []
+            
+        print(f"Processing {len(all_messages)} messages...")
+        
+        # Process messages in batches with robust error handling
+        emails = self._process_messages_robust(all_messages)
+        
+        self.emails_data = emails
+        print(f"Successfully processed {len(emails)} emails.")
+        
+        # Clean up progress file if successful
+        if os.path.exists('progress_backup.json'):
+            os.remove('progress_backup.json')
+            
+        return emails
+        
+    def _fetch_message_ids(self, query: str, max_results: Optional[int]) -> List[Dict]:
+        """Fetch message IDs with pagination"""
         all_messages = []
         page_token = None
         
@@ -91,83 +138,92 @@ class GmailAnalyzer:
                 
                 page_token = results.get('nextPageToken')
                 
-                print(f"Fetched {len(messages)} messages (total: {len(all_messages)})")
+                print(f"Fetched {len(messages)} message IDs (total: {len(all_messages)})")
                 
-                # Stop if we've reached max_results or no more pages
                 if not page_token or (max_results and len(all_messages) >= max_results):
                     break
                     
             except Exception as e:
-                print(f"Error fetching messages: {e}")
-                break
+                print(f"Error fetching message IDs: {e}")
+                time.sleep(5)  # Wait before retry
+                continue
         
         # Limit to max_results if specified
         if max_results and len(all_messages) > max_results:
             all_messages = all_messages[:max_results]
             print(f"Limited to {max_results} most recent messages")
-        
-        if not all_messages:
-            print("No messages found in the specified date range.")
-            return []
             
-        print(f"Processing {len(all_messages)} messages for detailed analysis...")
+        return all_messages
         
+    def _process_messages_robust(self, messages: List[Dict]) -> List[Dict]:
+        """Process messages with robust error handling and progress saving"""
         emails = []
-        failed_messages = []
+        failed_count = 0
+        batch_size = 100
         
-        for message in tqdm(all_messages, desc="Processing emails"):
-            success = False
-            max_retries = 3
+        for i in range(0, len(messages), batch_size):
+            batch = messages[i:i + batch_size]
+            batch_emails = []
             
-            for attempt in range(max_retries):
-                try:
-                    msg = self.service.users().messages().get(
-                        userId='me', id=message['id'], format='metadata',
-                        metadataHeaders=['From', 'Date', 'Subject']).execute()
+            print(f"Processing batch {i//batch_size + 1}/{(len(messages) + batch_size - 1)//batch_size}")
+            
+            for message in tqdm(batch, desc=f"Batch {i//batch_size + 1}"):
+                email_data = self._fetch_single_email_robust(message['id'])
+                if email_data:
+                    batch_emails.append(email_data)
+                else:
+                    failed_count += 1
                     
-                    headers = {h['name']: h['value'] for h in msg['payload']['headers']}
-                    
-                    email_data = {
-                        'message_id': message['id'],
-                        'sender': self._extract_email(headers.get('From', '')),
-                        'sender_name': self._extract_name(headers.get('From', '')),
-                        'date': headers.get('Date', ''),
-                        'subject': headers.get('Subject', ''),
-                        'timestamp': self._parse_date(headers.get('Date', ''))
-                    }
-                    
-                    emails.append(email_data)
-                    success = True
-                    break
-                    
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        # Wait before retry (exponential backoff)
-                        wait_time = (2 ** attempt)
-                        time.sleep(wait_time)
-                        continue
-                    else:
-                        # Final attempt failed
-                        failed_messages.append(message['id'])
-                        tqdm.write(f"Failed to process message {message['id']} after {max_retries} attempts: {e}")
-                        break
-        
-        if failed_messages:
-            print(f"\nWarning: Failed to process {len(failed_messages)} messages due to network issues.")
-            print(f"Successfully processed {len(emails)} out of {len(all_messages)} messages.")
-                
-        self.emails_data = emails
-        print(f"Final count: {len(emails)} emails processed successfully.")
+            emails.extend(batch_emails)
+            
+            # Save progress every batch
+            self.save_progress(emails)
+            
+            # Brief pause between batches to avoid rate limiting
+            time.sleep(1)
+            
+        if failed_count > 0:
+            print(f"Warning: Failed to process {failed_count} messages.")
+            
         return emails
         
+    def _fetch_single_email_robust(self, message_id: str, max_retries: int = 5) -> Optional[Dict]:
+        """Fetch single email with robust retry logic"""
+        for attempt in range(max_retries):
+            try:
+                msg = self.service.users().messages().get(
+                    userId='me', id=message_id, format='metadata',
+                    metadataHeaders=['From', 'Date', 'Subject']).execute()
+                
+                headers = {h['name']: h['value'] for h in msg['payload']['headers']}
+                
+                return {
+                    'message_id': message_id,
+                    'sender': self._extract_email(headers.get('From', '')),
+                    'sender_name': self._extract_name(headers.get('From', '')),
+                    'date': headers.get('Date', ''),
+                    'subject': headers.get('Subject', ''),
+                    'timestamp': self._parse_date(headers.get('Date', ''))
+                }
+                
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff with jitter
+                    wait_time = (2 ** attempt) + (time.time() % 1)
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    tqdm.write(f"Failed to fetch {message_id} after {max_retries} attempts: {str(e)[:100]}")
+                    return None
+                    
+        return None
+        
     def _extract_email(self, from_field: str) -> str:
-        """Extract email address from From field"""
         if '<' in from_field and '>' in from_field:
             return from_field.split('<')[1].split('>')[0].strip()
         return from_field.strip()
         
     def _extract_name(self, from_field: str) -> str:
-        """Extract sender name from From field"""
         if '<' in from_field:
             return from_field.split('<')[0].strip().strip('"')
         return from_field.split('@')[0] if '@' in from_field else from_field
@@ -176,7 +232,6 @@ class GmailAnalyzer:
         """Parse email date string to datetime object (timezone-naive for consistency)"""
         if not date_str:
             return None
-            
         try:
             from email.utils import parsedate_to_datetime
             dt = parsedate_to_datetime(date_str)
@@ -202,7 +257,6 @@ class GmailAnalyzer:
             'dates': []
         })
         
-        # Collect data for each sender
         for email in self.emails_data:
             sender = email['sender']
             timestamp = email['timestamp']
@@ -210,7 +264,7 @@ class GmailAnalyzer:
             if not sender or not timestamp:
                 continue
                 
-            # Handle string timestamps from cached data
+            # Convert string timestamps back to datetime objects (from JSON cache)
             if isinstance(timestamp, str):
                 try:
                     timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
@@ -218,6 +272,7 @@ class GmailAnalyzer:
                     if timestamp.tzinfo is not None:
                         timestamp = timestamp.replace(tzinfo=None)
                 except ValueError:
+                    # Try alternative parsing
                     try:
                         timestamp = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
                     except ValueError:
@@ -235,13 +290,11 @@ class GmailAnalyzer:
             if not stats['last_email_date'] or timestamp > stats['last_email_date']:
                 stats['last_email_date'] = timestamp
                 
-        # Calculate monthly averages and format results
         results = []
         for sender, stats in sender_stats.items():
             if stats['first_email_date'] and stats['last_email_date']:
-                # Calculate time span in months
                 time_span = (stats['last_email_date'] - stats['first_email_date']).days
-                months = max(1, time_span / 30.44)  # Average days per month
+                months = max(1, time_span / 30.44)
                 monthly_average = stats['total_emails'] / months
                 
                 results.append({
@@ -254,7 +307,6 @@ class GmailAnalyzer:
                     'time_span_days': time_span
                 })
                 
-        # Sort by total emails descending
         results.sort(key=lambda x: x['total_emails'], reverse=True)
         return results
         
@@ -271,7 +323,7 @@ class GmailAnalyzer:
         print(f"Total emails processed: {sum(r['total_emails'] for r in analysis_results)}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Analyze Gmail inbox and generate CSV report')
+    parser = argparse.ArgumentParser(description='Robust Gmail analyzer with error handling')
     parser.add_argument('--credentials', default='credentials.json', 
                        help='Path to Google API credentials JSON file')
     parser.add_argument('--start-date', required=True,
@@ -280,18 +332,19 @@ def main():
                        help='End date for analysis (YYYY/MM/DD format)')
     parser.add_argument('--max-emails', type=int, default=10000,
                        help='Maximum number of emails to fetch (default: 10000, use 0 for unlimited)')
-    parser.add_argument('--output', default='gmail_analysis.csv',
-                       help='Output CSV file name (default: gmail_analysis.csv)')
+    parser.add_argument('--output', default='gmail_analysis_robust.csv',
+                       help='Output CSV file name')
+    parser.add_argument('--resume', action='store_true',
+                       help='Resume from previous interrupted run')
     
     args = parser.parse_args()
     
     try:
-        analyzer = GmailAnalyzer(args.credentials)
+        analyzer = RobustGmailAnalyzer(args.credentials)
         analyzer.authenticate()
         
-        # Handle unlimited emails case
         max_emails = None if args.max_emails == 0 else args.max_emails
-        emails = analyzer.fetch_emails(args.start_date, args.end_date, max_emails)
+        emails = analyzer.fetch_emails_robust(args.start_date, args.end_date, max_emails, args.resume)
         
         if emails:
             analysis = analyzer.analyze_senders()
