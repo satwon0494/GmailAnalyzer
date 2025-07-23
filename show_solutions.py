@@ -38,7 +38,8 @@ def show_all_solutions():
     print("   📂 File: gmail_imap_analyzer.py")
     print("   🎯 Best for: Technical users, custom integration")
     print("   ⏱️  Your 200k emails: ~40-100 minutes")
-    print("   📋 Setup: OAuth2 + IMAP enabled")
+    print("   📋 Setup: OAuth2 + Enable IMAP in Gmail settings")
+    print("   🔧 Usage: python gmail_imap_analyzer.py --start-date YYYY/MM/DD --end-date YYYY/MM/DD")
     
     print("\n❌ **Original Script** (Too slow)")
     print("   🐌 Speed: ~400 emails/minute")
@@ -75,6 +76,20 @@ def show_quick_start():
     print("  --start-date 2025/05/01 --end-date 2025/06/30 \\")
     print("  --max-emails 0  # unlimited")
     print("```")
+    
+    print("\n🥉 **ALTERNATIVE: IMAP Protocol (Zero API Costs)**")
+    print("```bash")
+    print("# Direct email server access, no API quotas")
+    print("pip install -r requirements_optimized.txt")
+    print("")
+    print("# IMPORTANT: Enable IMAP in Gmail settings first!")
+    print("# Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP")
+    print("")
+    print("python gmail_imap_analyzer.py \\")
+    print("  --start-date 2025/05/01 --end-date 2025/06/30 \\")
+    print("  --output imap_analysis.csv")
+    print("```")
+    print("\n📖 **Complete IMAP Guide:** IMAP_SETUP_GUIDE.md")
 
 def show_performance_comparison():
     """Show performance comparison"""

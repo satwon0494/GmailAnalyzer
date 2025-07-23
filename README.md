@@ -44,6 +44,19 @@ python gmail_api_optimized.py \
   --max-emails 0
 ```
 
+### Direct Protocol: IMAP
+```bash
+# Zero API costs, direct email server access
+pip install -r requirements_optimized.txt
+
+# Enable IMAP in Gmail settings first!
+# Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP
+
+python gmail_imap_analyzer.py \
+  --start-date 2025/01/01 --end-date 2025/06/30 \
+  --output imap_analysis.csv
+```
+
 ## 📊 Complete Feature Set
 
 ### Core Analysis Features
@@ -115,7 +128,8 @@ python show_solutions.py --size d --use-case a --tech-level b
 ## 📖 Documentation
 
 - **[Performance Comparison](PERFORMANCE_COMPARISON.md)**: Detailed benchmarks and cost analysis
-- **[Quick Start Guide](QUICK_START_TAKEOUT.md)**: Step-by-step setup for fastest solution
+- **[Gmail Takeout Guide](QUICK_START_TAKEOUT.md)**: Step-by-step setup for fastest solution
+- **[IMAP Setup Guide](IMAP_SETUP_GUIDE.md)**: Complete IMAP configuration and usage
 - **Test Suite**: Comprehensive debugging and validation scripts
 
 ## 🐛 Issues Fixed
