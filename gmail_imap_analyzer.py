@@ -68,24 +68,58 @@ class GmailIMAPAnalyzer:
         email_address = self._get_email_from_credentials()
         auth_string = self._generate_oauth2_string(email_address, creds.token)
         
-        # Authenticate
-        self.imap.authenticate('XOAUTH2', lambda x: auth_string)
-        print("✅ Connected to Gmail IMAP successfully")
+        # Authenticate with proper error handling
+        try:
+            # IMAP authenticate expects a callable that returns bytes
+            def auth_callback(challenge):
+                return auth_string
+            
+            self.imap.authenticate('XOAUTH2', auth_callback)
+            print("✅ Connected to Gmail IMAP successfully")
+            
+        except imaplib.IMAP4.error as e:
+            error_msg = str(e)
+            print(f"❌ IMAP Authentication failed: {error_msg}")
+            
+            # Provide specific troubleshooting based on error
+            if 'Invalid SASL argument' in error_msg or 'BAD' in error_msg:
+                print("\n🔧 OAuth2 SASL Error - Try these fixes:")
+                print("1. Ensure IMAP is enabled: Gmail → Settings → Forwarding and POP/IMAP → Enable IMAP")
+                print("2. Delete token.pickle and re-authenticate")
+                print("3. Verify credentials.json is for 'Desktop application' type")
+                print("4. Check 2-Step Verification is enabled on your Google account")
+                print("5. Try using the Optimized API solution instead: gmail_api_optimized.py")
+            elif 'AUTHENTICATE failed' in error_msg:
+                print("\n🔧 Authentication Error - Try this:")
+                print("1. Regenerate OAuth2 credentials in Google Cloud Console")
+                print("2. Ensure Gmail API is enabled")
+                print("3. Use 'OAuth 2.0 Client ID' for Desktop application")
+            
+            # Suggest alternative
+            print("\n💡 Recommendation: Use the Optimized API solution for more reliable authentication:")
+            print("   python gmail_api_optimized.py --start-date 2014/01/01 --end-date 2025/06/30")
+            
+            raise RuntimeError(f"IMAP authentication failed. Try the API solution instead.")
         
     def _get_email_from_credentials(self) -> str:
-        """Extract email from credentials file"""
-        try:
-            with open(self.credentials_path, 'r') as f:
-                creds_data = json.load(f)
-                # This might not always work, fallback to user input
-                return input("Enter your Gmail address: ").strip()
-        except:
-            return input("Enter your Gmail address: ").strip()
+        """Get email address from user input with validation"""
+        print("\nFor IMAP authentication, we need your Gmail address.")
+        email = input("Enter your Gmail address: ").strip()
+        
+        # Basic email validation
+        if '@' not in email or '.' not in email.split('@')[1]:
+            raise ValueError(f"Invalid email format: {email}")
+        
+        if not email.endswith('@gmail.com'):
+            print("⚠️  Warning: This tool is designed for Gmail accounts")
+            
+        return email
             
     def _generate_oauth2_string(self, email: str, access_token: str) -> bytes:
-        """Generate OAuth2 authentication string"""
-        auth_string = f'user={email}\\x01auth=Bearer {access_token}\\x01\\x01'
-        return base64.b64encode(auth_string.encode()).decode()
+        """Generate OAuth2 authentication string for IMAP XOAUTH2"""
+        # Proper XOAUTH2 format: user=email\x01auth=Bearer token\x01\x01
+        auth_string = f'user={email}\x01auth=Bearer {access_token}\x01\x01'
+        return base64.b64encode(auth_string.encode('ascii'))
         
     def fetch_emails_imap(self, start_date: str, end_date: str, 
                          max_results: Optional[int] = None) -> List[Dict]:
