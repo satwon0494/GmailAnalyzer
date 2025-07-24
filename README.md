@@ -57,6 +57,8 @@ python gmail_imap_analyzer.py \
   --output imap_analysis.csv
 ```
 
+> **⚠️ IMAP Note**: OAuth2 IMAP setup can be complex. For large historical analysis, **Gmail Takeout is much faster and more reliable**. See [IMAP_ALTERNATIVE.md](IMAP_ALTERNATIVE.md) for troubleshooting.
+
 ## 📊 Complete Feature Set
 
 ### Core Analysis Features
@@ -130,6 +132,7 @@ python show_solutions.py --size d --use-case a --tech-level b
 - **[Performance Comparison](PERFORMANCE_COMPARISON.md)**: Detailed benchmarks and cost analysis
 - **[Gmail Takeout Guide](QUICK_START_TAKEOUT.md)**: Step-by-step setup for fastest solution
 - **[IMAP Setup Guide](IMAP_SETUP_GUIDE.md)**: Complete IMAP configuration and usage
+- **[IMAP Alternatives](IMAP_ALTERNATIVE.md)**: Troubleshooting and better alternatives for IMAP issues
 - **Test Suite**: Comprehensive debugging and validation scripts
 
 ## 🐛 Issues Fixed
